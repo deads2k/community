@@ -1,9 +1,12 @@
-# ThirdPartyResources - 2
+# Moving ThirdPartyResources to beta
 
 ## Background
-There are numerous, fundamental issues with TPRs today that we’ve tried to keep
-track of [here](https://github.com/kubernetes/features/issues/95).  This design
-describes how to build a TPR implementation that resolves the known issues.
+There are a number of important issues with the alpha version of
+ThirdPartyResources that we wish to address to move TPR to beta. The list is
+tracked [here](https://github.com/kubernetes/features/issues/95), and also
+includes feedback from existing Kubernetes ThirdPartyResource users. This
+proposal covers the steps we believe are necessary to move TPR to beta and to
+prevent future challenges in upgrading.
 
 
 ## Goals
