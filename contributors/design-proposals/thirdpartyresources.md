@@ -205,7 +205,7 @@ it will be manual.  At a high level, you simply:
  `$ kubectl delete TPR/name`
  5. Create a new TPR-registration.  
  `$ kubectl create -f new_tpr.name`
- 6. Recreate your new TPR-data.
+ 6. Recreate your new TPR-data.  
  `$ kubectl create -f data.yaml`
  7. Restart controllers.
 
