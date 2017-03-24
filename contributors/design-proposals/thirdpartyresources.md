@@ -199,8 +199,8 @@ it will be manual.  At a high level, you simply:
  stop controllers.
  2. Get all your TPR-data.  
  `$ kubectl get TPR --all-namespaces -o yaml > data.yaml`
- 3. Delete the old TPR-data.  
- `$ kubectl delete TPR --all --all-namespaces`
+ 3. Delete the old TPR-data.  Be sure you orphan!  
+ `$ kubectl delete TPR --all --all-namespaces --cascade=false`
  4. Delete the old TPR-registration.  
  `$ kubectl delete TPR/name`
  5. Create a new TPR-registration.  
@@ -211,8 +211,8 @@ it will be manual.  At a high level, you simply:
 
 There are a couple things that you'll need to consider:
  1. Garbage collection.  You may have created links that weren't respected by
- the GC collector in 1.6 (why did you do this, it was documented as not
- working?).  Unlink them before you delete.
+ the GC collector in 1.6.  Since you orphaned your dependents, you'll probably
+ want to re-adopt them like the Kubernetes controllers do with their resources.
  2. Controllers will observe deletes.  Part of this migration actually deletes
  the resource.  Your controller will see the delete.  You ought to shut down
  your TPR controller while you migrate your data.  If you do this, your
