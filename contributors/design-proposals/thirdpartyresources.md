@@ -10,6 +10,20 @@ prevent future challenges in upgrading.
 
 
 ## Goals
+1. Ensure ThirdPartyResource authors can version their APIs and offer their
+users a safe migration path between versions (including alpha->beta for the
+TPR, but also including a discussion of how a TPR author could perform a
+migration for their end users)
+2. Enable ThirdPartyResources to specify how they will appear in API
+discovery to be consistent with other resources and avoid naming confilcts
+3. Move TPR into their own API group to allow the extensions group to be
+[removed](https://github.com/kubernetes/kubernetes/issues/43214)
+4. Support cluster scoped TPR resources
+5. Identify other features required for TPR to become beta
+
+Non-goals
+1. Solve automatic conversion of TPR between versions or automatic migration of
+existing TPR
 
 ### Desired API Semantics
 TPRs are intended to look like normal kube-like resources to external clients.
@@ -181,11 +195,19 @@ Once the finalizer is done, it will delete the TPR-registration itself.
 Because of the changes required to meet the goals, there is not a silent
 auto-migration from the existing TPR to the new TPR.  It will be possible, but
 it will be manual.  At a high level, you simply:
- 1. get all your TPR-data
- 2. delete the old TPR-data
- 3. delete the old TPR-registration
- 4. create a new TPR-registration
- 5. recreate your new TPR-data
+ 1. Stop all clients from writing to TPR (revoke edit rights for all users) and
+ stop controllers.
+ 2. Get all your TPR-data.  
+ `$ kubectl get TPR --all-namespaces -o yaml > data.yaml`
+ 3. Delete the old TPR-data.  
+ `$ kubectl delete TPR --all --all-namespaces`
+ 4. Delete the old TPR-registration.  
+ `$ kubectl delete TPR/name`
+ 5. Create a new TPR-registration.  
+ `$ kubectl create -f new_tpr.name`
+ 6. Recreate your new TPR-data.
+ `$ kubectl create -f data.yaml`
+ 7. Restart controllers.
 
 There are a couple things that you'll need to consider:
  1. Garbage collection.  You may have created links that weren't respected by
@@ -195,3 +217,8 @@ There are a couple things that you'll need to consider:
  the resource.  Your controller will see the delete.  You ought to shut down
  your TPR controller while you migrate your data.  If you do this, your
  controller will never see a delete.
+
+
+# stop all clients from writing to TPR (revoke edit rights for all users)? / stop controllers
+$ kubectl get TPR --all-namespaces -o yaml > data.yaml
+
