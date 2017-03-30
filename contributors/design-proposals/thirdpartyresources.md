@@ -10,10 +10,8 @@ prevent future challenges in upgrading.
 
 
 ## Goals
-1. Ensure ThirdPartyResource authors can version their APIs and offer their
-users a safe migration path between versions (including alpha->beta for the
-TPR, but also including a discussion of how a TPR author could perform a
-migration for their end users)
+1. Ensure ThirdPartyResource APIs operate consistently with first party
+Kubernetes APIs.
 2. Enable ThirdPartyResources to specify how they will appear in API
 discovery to be consistent with other resources and avoid naming confilcts
 3. Move TPR into their own API group to allow the extensions group to be
@@ -33,14 +31,16 @@ watch, create, patch, update, and delete semantics.
 In "normal" Kubernetes APIs, if I have a persisted resource in the same group
 with the same name in v1 and v2, they are backed by the same underlying object.
 A change made to one is reflected in the other. API clients, garbage collection,
-namespace cleanup, version negotiation, and controller all build on this.
+namespace cleanup, version negotiation, and controllers all build on this.
 
 The convertibility of Kubernetes APIs provides a seamless interaction between
 versions.  A TPR does not have the ability to convert between versions, so this
 experience is broken.
 
 Allowing a single, user specified version for a given TPR will provide this
-semantic by preventing server-side versioning altogether.
+semantic by preventing server-side versioning altogether.  All instances of a
+single TPR must have the same version or the Kubernetes API semantic of always
+returning a resource encoded to the matching version will not be maintained.
 
 
 ### Avoiding Naming Problems
@@ -50,39 +50,48 @@ value-spaces within an API group and must not conflict.  They are:
   1. plural resource-type name - like "configmaps"
   2. singular resource-type name - like "configmap"
   3. short names - like "cm"
-2. Kind-type value space
+2. Kind-type value space - for group "example.com"
   1. Kind name - like "ConfigMap"
   2. ListKind name - like "ConfigMapList"
 If these values conflict within their value-spaces then no client will be able
 to properly distinguish intent.
 
-The actual name of of the TPR-registration (resource that describes the TPR to
+The actual name of the TPR-registration (resource that describes the TPR to
 create) resource can only protect one of these values from conflict.  Since
 Kubernetes API types are accessed via a URL that looks like `/apis/<group>/<version>/namespaces/<namespace-name>/<plural-resource-type>`,
 the name of the TPR-registration object will be `<plural-resource-type>.<group>`.
 
 Conflicts with other parts of the value-space can not be detected with static
 validation, so there will be a spec/status split with `status.conditions` that
-reflect the acceptance status of a TPR-registration.
+reflect the acceptance status of a TPR-registration.  For instance, you cannot
+determine whether two TPRs in the same group have the same short name without
+inspecting the current state of existing TPRs.
+
+Parts of the value-space will be "claimed" by making an entry in TPR.status to
+include the accepted names which will be served.  This prevents a new TPR from
+disabling an existing TPR's name.
 
 
 ## New API
 In order to: 
-1. eliminate opaquely derived information
-1. allow the expression of complex transformations
+1. eliminate opaquely derived information - deriving camel-cased kind names
+from lower-case dash-delimited values as for instance.
+1. allow the expression of complex transformations - not all plurals are easily
+determined (ox and oxen) and not all are English.  Fields for complete
+specification eliminates ambiguity.
 1. handle TPR-registration value-space conflicts
 1. [stop using the extensions API group](https://github.com/kubernetes/kubernetes/issues/43214)
 
-We can create a type `ThirdParty.apiextension.k8s.io`.
+We can create a type `ThirdPartyResource.apiextension.k8s.io`.
 ```go
-// ThirdPartySpec describe how a user wants their resource to appear
-type ThirdPartySpec struct {
+// ThirdPartyResourceSpec describe how a user wants their resource to appear
+type ThirdPartyResourceSpec struct {
 	// Group is the group this resource belongs in
 	Group string `json:"group" protobuf:"bytes,1,opt,name=group"`
 	// Version is the version this resource belongs in
 	Version string `json:"version" protobuf:"bytes,2,opt,name=version"`
-	// Name is the plural name of the resource
-	Name string `json:"name" protobuf:"bytes,3,opt,name=name"`
+	// Plural is the plural name of the resource
+	Plural string `json:"plural" protobuf:"bytes,3,opt,name=plural"`
 	// Singular is the singular name of the resource.  Defaults to lowercased <kind>
 	Singular string `json:"singular,omitempty" protobuf:"bytes,4,opt,name=singular"`
 	// ShortNames are short names for the resource.
@@ -108,20 +117,24 @@ const (
 	ConditionUnknown ConditionStatus = "Unknown"
 )
 
-// ThirdPartyConditionType is a valid value for ThirdPartyCondition.Type
-type ThirdPartyConditionType string
+// ThirdPartyResourceConditionType is a valid value for ThirdPartyResourceCondition.Type
+type ThirdPartyResourceConditionType string
 
 const (
-	// NameConflict means the names chosen for this ThirdParty conflict with others in the group.
-	NameConflict ThirdPartyConditionType = "NameConflict"
-	// Terminating means that the ThirdParty has been deleted and is cleaning up.
-	Terminating ThirdPartyConditionType = "Terminating"
+	// ResourceNameConflict means the resource names chosen for this ThirdPartyResource conflict with others in the group.
+	// The first TPR in the group to have the name reflected in status "wins" the name.
+	ResourceNameConflict ThirdPartyResourceConditionType = "ResourceNameConflict"
+	// KindNameConflict means the kind names chosen for this ThirdPartyResource conflict with others in the group.
+	// The first TPR in the group to have the name reflected in status "wins" the name.
+	KindNameConflict ThirdPartyResourceConditionType = "ResourceNameConflict"
+	// Terminating means that the ThirdPartyResource has been deleted and is cleaning up.
+	Terminating ThirdPartyResourceConditionType = "Terminating"
 )
 
-// ThirdPartyCondition contains details for the current condition of this pod.
-type ThirdPartyCondition struct {
+// ThirdPartyResourceCondition contains details for the current condition of this ThirdPartyResource.
+type ThirdPartyResourceCondition struct {
 	// Type is the type of the condition.
-	Type ThirdPartyConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=ThirdPartyConditionType"`
+	Type ThirdPartyResourceConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=ThirdPartyResourceConditionType"`
 	// Status is the status of the condition.
 	// Can be True, False, Unknown.
 	Status ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=ConditionStatus"`
@@ -139,49 +152,57 @@ type ThirdPartyCondition struct {
 	Message string `json:"message,omitempty" protobuf:"bytes,6,opt,name=message"`
 }
 
-// ThirdPartyStatus indicates the state of the ThirdParty
-type ThirdPartyStatus struct {
-	// Conditions indicate state for particular aspects of a ThirdParty
-	Conditions []ThirdPartyCondition `json:"conditions" protobuf:"bytes,1,opt,name=conditions"`
+// ThirdPartyResourceStatus indicates the state of the ThirdPartyResource
+type ThirdPartyResourceStatus struct {
+	// Conditions indicate state for particular aspects of a ThirdPartyResource
+	Conditions []ThirdPartyResourceCondition `json:"conditions" protobuf:"bytes,1,opt,name=conditions"`
+
+	// Singular is the singular name of the resource.  Defaults to lowercased <kind>
+	Singular string `json:"singular,omitempty" protobuf:"bytes,2,opt,name=singular"`
+	// ShortNames are short names for the resource.
+	ShortNames []string `json:"shortNames,omitempty" protobuf:"bytes,3,opt,name=shortNames"`
+	// Kind is the serialized kind of the resource
+	Kind string `json:"kind" protobuf:"bytes,4,opt,name=kind"`
+	// ListKind is the serialized kind of the list for this resource.  Defaults to <kind>List
+	ListKind string `json:"listKind,omitempty" protobuf:"bytes,5,opt,name=listKind"`
 }
 
 // +genclient=true
 
-// ThirdParty represents a resource that should be exposed on the API server.  Its name MUST be in the format
-// <.spec.name>.<.spec.group>.
-type ThirdParty struct {
+// ThirdPartyResource represents a resource that should be exposed on the API server.  Its name MUST be in the format
+// <.spec.plural>.<.spec.group>.
+type ThirdPartyResource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
 	// Spec describes how the user wants the resources to appear
-	Spec ThirdPartySpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
-	// Status indicates the actual state of the ThirdParty
-	Status ThirdPartyStatus `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"`
+	Spec ThirdPartyResourceSpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
+	// Status indicates the actual state of the ThirdPartyResource
+	Status ThirdPartyResourceStatus `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"`
 }
 
-// ThirdPartyList is a list of ThirdParty objects.
-type ThirdPartyList struct {
+// ThirdPartyResourceList is a list of ThirdPartyResource objects.
+type ThirdPartyResourceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
 	// Items individual ThirdParties
-	Items []ThirdParty `json:"items" protobuf:"bytes,2,rep,name=items"`
+	Items []ThirdPartyResource `json:"items" protobuf:"bytes,2,rep,name=items"`
 }
 ```
 
 
 ## Behavior
 ### Create
-When a new TPR-registration is completed, no synchronous action is taken.
+When a new TPR is created, no synchronous action is taken.
 A controller will run to confirm that value-space of the reserved names doesn't
-collide and sets the "NameConflict" condition to `false`.
+collide and sets the "KindNameConflict" condition to `false`.
 
-A custom `http.Handler` which accepts a delegate (like our current
-genericapiserver), will look at the `request.RequestInfo` (in the context) and
-check its Lister (created by generated client code) for a match with proper
-conditions.  If no match is found, it delegates.  If a match is found, it runs
-it's own RESTStorage.  If the match was `Terminating`, it will allow reads and
-delete, but reject mutations.
+A custom `http.Handler` will look at request and use the parsed out
+GroupVersionResource information to match it to a ThirdPartyResource.  The ThirdPartyResource
+will be checked to make sure its valid enough in .Status to serve and will
+response appropriated.  If there is no ThirdPartyResource defined, it will delegate
+to the next handler in the chain.
 
 ### Delete
 When a TPR-registration is deleted, it will be handled as a finalizer like a
@@ -203,7 +224,7 @@ it will be manual.  At a high level, you simply:
  `$ kubectl delete TPR --all --all-namespaces --cascade=false`
  4. Delete the old TPR-registration.  
  `$ kubectl delete TPR/name`
- 5. Create a new TPR-registration.  
+ 5. Create a new TPR-registration with the same GroupVersionKind as before.  
  `$ kubectl create -f new_tpr.name`
  6. Recreate your new TPR-data.  
  `$ kubectl create -f data.yaml`
@@ -217,8 +238,4 @@ There are a couple things that you'll need to consider:
  the resource.  Your controller will see the delete.  You ought to shut down
  your TPR controller while you migrate your data.  If you do this, your
  controller will never see a delete.
-
-
-# stop all clients from writing to TPR (revoke edit rights for all users)? / stop controllers
-$ kubectl get TPR --all-namespaces -o yaml > data.yaml
 
